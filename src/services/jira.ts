@@ -1,6 +1,9 @@
 import { JiraApi } from 'ts-jira-client';
 import config from '@/config/env';
 
+// Default fields for optimized queries
+const DEFAULT_FIELDS = ['key', 'summary', 'status', 'assignee', 'priority'];
+
 // Add Node.js types for process
 declare global {
   interface Process {
@@ -194,6 +197,7 @@ export class JiraService {
    * @param maxResults The maximum number of results to return
    * @param startAt The index of the first result to return (0-based)
    * @param expand Optional fields to expand in the response (array of fields)
+   * @param fields Optional fields to include in the response (for token optimization)
    * @returns The structured search results
    */
   async searchIssues(
@@ -201,6 +205,7 @@ export class JiraService {
     maxResults = 20,
     startAt = 0,
     expand?: string[],
+    fields?: string[],
   ): Promise<StructuredJiraSearchResult> {
     try {
       // Build search options
@@ -208,6 +213,7 @@ export class JiraService {
         maxResults: number;
         startAt: number;
         expand?: string[];
+        fields?: string[];
       } = {
         maxResults,
         startAt,
@@ -218,11 +224,23 @@ export class JiraService {
         searchOptions.expand = expand;
       }
 
+      // Add fields if provided (for token optimization)
+      if (fields && fields.length > 0) {
+        searchOptions.fields = fields;
+      }
+
       // Execute search
       const searchResult = (await this.client.searchJira(
         jql,
         searchOptions,
       )) as JiraSearchResult;
+
+      // Warn if results truncated
+      if (searchResult.total > maxResults) {
+        console.error(
+          `[Warning] Query returned ${searchResult.total} issues but only fetched ${maxResults}. Results may be incomplete.`,
+        );
+      }
 
       // Process each issue in the results
       const structuredIssues: StructuredJiraIssue[] = searchResult.issues.map(
@@ -267,9 +285,31 @@ export class JiraService {
         total: searchResult.total,
         issues: structuredIssues,
       };
-    } catch (error) {
+    } catch (error: any) {
+      // Handle Jira API errors with clear messages
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        throw new Error(
+          'Jira authentication failed. Check ATLASSIAN_API_TOKEN and ATLASSIAN_EMAIL in .env file',
+        );
+      }
+      if (error.response?.status === 400) {
+        const jiraError =
+          error.response.data.errorMessages?.[0] || 'Invalid request';
+        throw new Error(`Invalid JQL query: ${jql}\nJira error: ${jiraError}`);
+      }
+      if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+        throw new Error(
+          'Cannot connect to Jira. Check ATLASSIAN_HOST in .env and network connection',
+        );
+      }
+      if (error.code === 'ENOTFOUND') {
+        throw new Error(
+          `Cannot resolve Jira host. Check ATLASSIAN_HOST in .env: ${process.env.ATLASSIAN_HOST}`,
+        );
+      }
+      // Re-throw unexpected errors with context
       console.error(`Error searching issues with query ${jql}:`, error);
-      throw error;
+      throw new Error(`Jira API error: ${error.message}`);
     }
   }
 

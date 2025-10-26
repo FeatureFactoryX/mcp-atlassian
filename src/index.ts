@@ -35,6 +35,8 @@ import {
   registerJiraTransitionIssueTool,
   registerJiraGetTransitionsTool,
   registerJiraGetAllProjectsTool,
+  registerCalculateStoryPointsTool,
+  registerDeploymentReportTool,
 } from './tools';
 
 // Load environment variables
@@ -128,6 +130,12 @@ class McpAtlassianServer {
     if (isToolEnabled('jira_get_all_projects')) {
       registerJiraGetAllProjectsTool(server, this.jiraService);
     }
+    if (isToolEnabled('calculate_story_points')) {
+      registerCalculateStoryPointsTool(server, this.jiraService);
+    }
+    if (isToolEnabled('deployment_report')) {
+      registerDeploymentReportTool(server, this.jiraService);
+    }
 
     return server;
   }
@@ -170,6 +178,8 @@ class McpAtlassianServer {
             'jira_transition_issue',
             'jira_get_transitions',
             'jira_get_all_projects',
+            'calculate_story_points',
+            'deployment_report',
           ].filter((tool) => isToolEnabled(tool)),
         },
       });

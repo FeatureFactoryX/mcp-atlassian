@@ -21,3 +21,5 @@ export { registerJiraAddCommentTool } from './jira-add-comment';
 export { registerJiraTransitionIssueTool } from './jira-transition-issue';
 export { registerJiraGetTransitionsTool } from './jira-get-transitions';
 export { registerJiraGetAllProjectsTool } from './jira-get-all-projects';
+export { registerCalculateStoryPointsTool } from './calculate-story-points';
+export { registerDeploymentReportTool } from './deployment-report';

@@ -25,7 +25,14 @@ export function registerSearchJiraIssuesTool(
       try {
         // remove any new lines in the query
         const cleanedJql = jql.replace(/\n/g, '');
-        const results = await jiraService.searchIssues(cleanedJql, maxResults);
+        // Use field filtering to reduce token consumption (only 5 fields)
+        const results = await jiraService.searchIssues(
+          cleanedJql,
+          maxResults,
+          0, // startAt
+          undefined, // expand
+          ['key', 'summary', 'status', 'assignee', 'priority'], // fields
+        );
         return formatResponse(results);
       } catch (err) {
         return formatErrorResponse(err);
