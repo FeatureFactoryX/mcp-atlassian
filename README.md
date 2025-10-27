@@ -11,12 +11,12 @@ This MCP server allows AI agents to interact with Atlassian products through a s
 
 ## Key Features
 
-- **Modern API Support**: Uses Confluence v2 REST API with fallback to v1 for search functionality
+- **Modern API Support**: Uses Confluence v2 REST API with fallback to v1 for search functionality, and Jira API v3 with enhanced search endpoints
 - **Comprehensive Toolset**: 18+ Confluence tools and 8+ Jira tools covering all major operations
 - **Token Optimization**: Custom field filtering for Jira queries reduces token consumption by 90%+
 - **Security & Privacy**: Built-in PII filtering and SSL verification controls
 - **Flexible Configuration**: Support for separate service URLs, authentication methods, and tool filtering
-- **Pagination Support**: Cursor-based pagination for v2 APIs and offset/limit for v1 APIs
+- **Pagination Support**: Cursor-based pagination for Confluence v2 APIs, token-based pagination for Jira v3 enhanced search API
 - **Error Handling**: Comprehensive error handling with detailed error messages
 - **Type Safety**: Full TypeScript implementation with proper type definitions
 
@@ -96,14 +96,25 @@ This will start the MCP server, which will listen and respond on streamable HTTP
 
 ### MCP configuration
 
+The server runs on port 3005 by default (configurable via `PORT` environment variable in `.env`).
+
+#### Claude Code/Desktop Configuration
+
+Add to your Claude configuration file:
+
 ```json
-    "mcp-searchapi": {
-      "name": "mcp-searchapi",
+{
+  "mcpServers": {
+    "atlassian": {
       "type": "streamable-http",
       "streamable": true,
-      "url": "http://localhost:3007/mcp"
+      "url": "http://localhost:3005/mcp"
     }
+  }
+}
 ```
+
+**Note**: The port defaults to 3000 if `PORT` is not set in your `.env` file. Adjust the URL accordingly.
 
 ### Available Tools
 
@@ -241,6 +252,30 @@ This server primarily uses the **Confluence v2 REST API** for most operations, w
 - **Tool Whitelist**: Enable only specific tools via `ENABLED_TOOLS` environment variable
 - **PII Filtering**: Automatic detection and masking of sensitive information in responses
 - **Error Context**: Detailed error messages without exposing sensitive configuration
+
+## Recent Migrations
+
+### Jira Client Library (October 2025)
+
+Migrated from `ts-jira-client` to `jira.js` (v5.2.2) for better API v3 support and active maintenance.
+
+**Key changes**:
+- Full TypeScript support with comprehensive type definitions
+- Native Jira API v3 support via `Version3Client`
+- Better error handling and authentication
+- No configuration changes required
+
+### Enhanced Search API (October 2025)
+
+Migrated from deprecated `/rest/api/3/search` endpoint to `/rest/api/3/search/jql` following [Atlassian CHANGE-2046](https://developer.atlassian.com/changelog/#CHANGE-2046).
+
+**Key changes**:
+- Token-based pagination using `nextPageToken` instead of offset-based `startAt`
+- Response includes `isLast` flag instead of `total` count
+- Better read-after-write consistency
+- All existing JQL queries continue to work unchanged
+
+See [CUSTOMIZATIONS.md](CUSTOMIZATIONS.md) for detailed migration information and implementation details.
 
 ## Development
 
