@@ -29,9 +29,9 @@
     "@types/express": "^5.0.3",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
+    "jira.js": "^5.2.2",
     "module-alias": "^2.2.3",
     "node-fetch": "^3.3.2",
-    "ts-jira-client": "^1.0.6",
     "tsconfig-paths": "^4.2.0"
   }
 }

@@ -250,7 +250,8 @@ export function formatResponse(data: any, pii: boolean = false) {
 export function formatErrorResponse(err: unknown) {
   const error = err instanceof Error ? err : new Error('Unknown error');
   // Mask any sensitive information in the error message
-  const maskedErrorMessage = maskSensitiveInfo(error.message);
+  // Ensure error.message is always a string to avoid "text.replace is not a function"
+  const maskedErrorMessage = maskSensitiveInfo(String(error.message || 'Unknown error'));
 
   return {
     content: [

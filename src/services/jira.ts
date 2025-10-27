@@ -1,4 +1,4 @@
-import { JiraApi } from 'ts-jira-client';
+import { Version3Client } from 'jira.js';
 import config from '@/config/env';
 
 // Default fields for optimized queries
@@ -37,6 +37,10 @@ interface JiraIssueFields {
     name: string;
     [key: string]: unknown;
   };
+  assignee?: {
+    displayName?: string;
+    [key: string]: unknown;
+  };
   comment?: {
     comments: JiraComment[];
     [key: string]: unknown;
@@ -66,16 +70,16 @@ interface StructuredJiraIssue {
 }
 
 interface JiraSearchResult {
-  startAt: number;
+  nextPageToken?: string;
+  isLast: boolean;
   maxResults: number;
-  total: number;
   issues: JiraIssue[];
 }
 
 interface StructuredJiraSearchResult {
-  startAt: number;
+  nextPageToken?: string;
+  isLast: boolean;
   maxResults: number;
-  total: number;
   issues: StructuredJiraIssue[];
 }
 
@@ -83,25 +87,23 @@ interface StructuredJiraSearchResult {
  * Jira service for interacting with the Jira API
  */
 export class JiraService {
-  private client: JiraApi;
+  private client: Version3Client;
 
   constructor() {
     // Use the dedicated Jira URL if available, otherwise derive from Atlassian host
     const jiraUrl = config.jira.url || config.atlassian.host;
 
-    // Extract the hostname from the full URL
-    const host = jiraUrl.replace(/^https?:\/\//, '');
-
     // Disable SSL verification globally for Node.js (bypass self-signed certificate issues)
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
-    this.client = new JiraApi({
-      protocol: 'https',
-      host,
-      username: config.atlassian.email,
-      password: config.atlassian.apiToken,
-      apiVersion: 2,
-      strictSSL: false, // Force disable SSL verification
+    this.client = new Version3Client({
+      host: jiraUrl,
+      authentication: {
+        basic: {
+          email: config.atlassian.email,
+          apiToken: config.atlassian.apiToken,
+        },
+      },
     });
   }
 
@@ -110,8 +112,12 @@ export class JiraService {
    * @param text The text to clean
    * @returns The cleaned text
    */
-  private cleanText(text: string): string {
+  private cleanText(text: string | any): string {
     if (!text) return '';
+    // If text is an object (ADF format), convert to string
+    if (typeof text !== 'string') {
+      text = JSON.stringify(text);
+    }
     // Remove HTML tags
     const withoutHtml = text.replace(/<[^>]*>/g, '');
     // Normalize whitespace
@@ -145,12 +151,11 @@ export class JiraService {
     expand?: string,
   ): Promise<StructuredJiraIssue> {
     try {
-      // The ts-jira-client findIssue method accepts issueKey as first parameter
-      // and a string for expand parameter
-      const issue = (await this.client.findIssue(
-        issueKey,
-        expand,
-      )) as JiraIssue;
+      // Use jira.js getIssue method
+      const issue = (await this.client.issues.getIssue({
+        issueIdOrKey: issueKey,
+        expand: expand,
+      })) as JiraIssue;
 
       // Extract fields
       const fields = issue.fields;
@@ -192,35 +197,35 @@ export class JiraService {
   }
 
   /**
-   * Search for issues using JQL
+   * Search for issues using JQL (raw results)
    * @param jql The JQL query
    * @param maxResults The maximum number of results to return
-   * @param startAt The index of the first result to return (0-based)
-   * @param expand Optional fields to expand in the response (array of fields)
+   * @param nextPageToken Token for pagination (optional, for first page)
+   * @param expand Optional fields to expand in the response (comma-separated string)
    * @param fields Optional fields to include in the response (for token optimization)
-   * @returns The structured search results
+   * @returns The raw search results from Jira API
    */
-  async searchIssues(
+  async searchIssuesRaw(
     jql: string,
     maxResults = 20,
-    startAt = 0,
-    expand?: string[],
+    nextPageToken?: string,
+    expand?: string,
     fields?: string[],
-  ): Promise<StructuredJiraSearchResult> {
+  ): Promise<JiraSearchResult> {
     try {
       // Build search options
       const searchOptions: {
         maxResults: number;
-        startAt: number;
-        expand?: string[];
+        nextPageToken?: string;
+        expand?: string;
         fields?: string[];
       } = {
         maxResults,
-        startAt,
+        nextPageToken,
       };
 
       // Add expand if provided
-      if (expand && expand.length > 0) {
+      if (expand) {
         searchOptions.expand = expand;
       }
 
@@ -229,18 +234,76 @@ export class JiraService {
         searchOptions.fields = fields;
       }
 
-      // Execute search
-      const searchResult = (await this.client.searchJira(
+      // Execute search using jira.js searchForIssuesUsingJqlEnhancedSearch (new endpoint)
+      const searchResult = await this.client.issueSearch.searchForIssuesUsingJqlEnhancedSearch({
         jql,
-        searchOptions,
-      )) as JiraSearchResult;
+        maxResults: searchOptions.maxResults,
+        nextPageToken: searchOptions.nextPageToken,
+        expand: searchOptions.expand,
+        fields: searchOptions.fields,
+      }) as JiraSearchResult;
 
-      // Warn if results truncated
-      if (searchResult.total > maxResults) {
-        console.error(
-          `[Warning] Query returned ${searchResult.total} issues but only fetched ${maxResults}. Results may be incomplete.`,
+      return searchResult;
+    } catch (error: any) {
+      // Handle Jira API errors with clear messages
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        throw new Error(
+          `Authentication failed. Please check your Jira credentials. Error: ${error.message}`,
         );
       }
+      console.error('Error searching issues:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Search for issues using JQL
+   * @param jql The JQL query
+   * @param maxResults The maximum number of results to return
+   * @param nextPageToken Token for pagination (optional, for first page)
+   * @param expand Optional fields to expand in the response (comma-separated string)
+   * @param fields Optional fields to include in the response (for token optimization)
+   * @returns The structured search results
+   */
+  async searchIssues(
+    jql: string,
+    maxResults = 20,
+    nextPageToken?: string,
+    expand?: string,
+    fields?: string[],
+  ): Promise<StructuredJiraSearchResult> {
+    try {
+      // Build search options
+      const searchOptions: {
+        maxResults: number;
+        nextPageToken?: string;
+        expand?: string;
+        fields?: string[];
+      } = {
+        maxResults,
+        nextPageToken,
+      };
+
+      // Add expand if provided
+      if (expand) {
+        searchOptions.expand = expand;
+      }
+
+      // Add fields if provided (for token optimization)
+      if (fields && fields.length > 0) {
+        searchOptions.fields = fields;
+      }
+
+      // Execute search using jira.js searchForIssuesUsingJqlEnhancedSearch (new endpoint)
+      const searchResult = await this.client.issueSearch.searchForIssuesUsingJqlEnhancedSearch({
+        jql,
+        maxResults: searchOptions.maxResults,
+        nextPageToken: searchOptions.nextPageToken,
+        expand: searchOptions.expand,
+        fields: searchOptions.fields,
+      }) as JiraSearchResult;
+
+      // Note: The new API does not provide total count, so we cannot warn about truncation
 
       // Process each issue in the results
       const structuredIssues: StructuredJiraIssue[] = searchResult.issues.map(
@@ -280,9 +343,9 @@ export class JiraService {
 
       // Return structured search result
       return {
-        startAt: searchResult.startAt,
+        nextPageToken: searchResult.nextPageToken,
+        isLast: searchResult.isLast,
         maxResults: searchResult.maxResults,
-        total: searchResult.total,
         issues: structuredIssues,
       };
     } catch (error: any) {
@@ -345,7 +408,7 @@ export class JiraService {
         },
       };
 
-      return await this.client.addNewIssue(issue);
+      return await this.client.issues.createIssue(issue);
     } catch (error) {
       console.error('Error creating issue:', error);
       throw error;
@@ -381,7 +444,10 @@ export class JiraService {
         update.fields.assignee = { name: updateData.assignee };
       if (updateData.labels) update.fields.labels = updateData.labels;
 
-      await this.client.updateIssue(issueKey, update);
+      await this.client.issues.editIssue({
+        issueIdOrKey: issueKey,
+        ...update,
+      });
     } catch (error) {
       console.error(`Error updating issue ${issueKey}:`, error);
       throw error;
@@ -395,7 +461,9 @@ export class JiraService {
    */
   async deleteIssue(issueKey: string): Promise<void> {
     try {
-      await this.client.deleteIssue(issueKey);
+      await this.client.issues.deleteIssue({
+        issueIdOrKey: issueKey,
+      });
     } catch (error) {
       console.error(`Error deleting issue ${issueKey}:`, error);
       throw error;
@@ -410,7 +478,10 @@ export class JiraService {
    */
   async addComment(issueKey: string, comment: string): Promise<unknown> {
     try {
-      return await this.client.addComment(issueKey, { body: comment });
+      return await this.client.issueComments.addComment({
+        issueIdOrKey: issueKey,
+        comment: comment,
+      });
     } catch (error) {
       console.error(`Error adding comment to issue ${issueKey}:`, error);
       throw error;
@@ -424,7 +495,9 @@ export class JiraService {
    */
   async getTransitions(issueKey: string): Promise<unknown> {
     try {
-      return await this.client.listTransitions(issueKey);
+      return await this.client.issues.getTransitions({
+        issueIdOrKey: issueKey,
+      });
     } catch (error) {
       console.error(`Error getting transitions for issue ${issueKey}:`, error);
       throw error;
@@ -451,7 +524,10 @@ export class JiraService {
       if (comment) {
         transition.update = { comment: [{ add: { body: comment } }] };
       }
-      await this.client.transitionIssue(issueKey, transition);
+      await this.client.issues.doTransition({
+        issueIdOrKey: issueKey,
+        ...transition,
+      });
     } catch (error) {
       console.error(`Error transitioning issue ${issueKey}:`, error);
       throw error;
@@ -464,7 +540,7 @@ export class JiraService {
    */
   async getAllProjects(): Promise<unknown> {
     try {
-      return await this.client.listProjects();
+      return await this.client.projects.searchProjects();
     } catch (error) {
       console.error('Error getting all projects:', error);
       throw error;
@@ -491,7 +567,10 @@ export class JiraService {
       if (comment) worklog.comment = comment;
       if (started) worklog.started = started;
 
-      return await this.client.addWorklog(issueKey, worklog);
+      return await this.client.issueWorklogs.addWorklog({
+        issueIdOrKey: issueKey,
+        ...worklog,
+      });
     } catch (error) {
       console.error(`Error adding worklog to issue ${issueKey}:`, error);
       throw error;

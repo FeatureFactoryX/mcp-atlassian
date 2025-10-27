@@ -14,6 +14,8 @@ export const READ_TOOLS = [
   'get_jira_issue',
   'jira_get_transitions',
   'jira_get_all_projects',
+  'calculate_story_points',
+  'deployment_report',
 ];
 
 export const WRITE_TOOLS = [

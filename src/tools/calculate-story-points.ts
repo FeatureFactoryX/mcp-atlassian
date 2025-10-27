@@ -33,7 +33,7 @@ export function registerCalculateStoryPointsTool(
 
         // Build JQL query with dynamic projects
         const projectsJql = projects.join(', ');
-        let jql = `project IN (${projectsJql}) AND status = 'Done' AND `;
+        let jql = `project IN (${projectsJql}) AND statusCategory = Done AND `;
 
         if (startDate) {
           // Parse date string and convert to JQL format
@@ -44,11 +44,11 @@ export function registerCalculateStoryPointsTool(
           jql += "resolved >= -14d";
         }
 
-        // Fetch with ONLY 2 fields
-        const results = await jiraService.searchIssues(
+        // Fetch with ONLY 2 fields - use raw search results
+        const results = await jiraService.searchIssuesRaw(
           jql,
           150,
-          0, // startAt
+          undefined, // nextPageToken (first page)
           undefined, // expand
           ['project', 'customfield_10016'], // Only project and story points
         );
@@ -92,6 +92,7 @@ export function registerCalculateStoryPointsTool(
           },
         });
       } catch (err) {
+        console.error('ERROR in calculate_story_points:', err);
         return formatErrorResponse(err);
       }
     },

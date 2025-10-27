@@ -84,11 +84,11 @@ export function registerDeploymentReportTool(
         // Build JQL - note: status changed DURING syntax, with dynamic project
         const jql = `project = ${project} AND status changed DURING ("${startDateFormatted}", "${endDateFormatted}") ORDER BY updated DESC`;
 
-        // Fetch with ONLY 6 fields
-        const results = await jiraService.searchIssues(
+        // Fetch with ONLY 6 fields - use searchIssuesRaw to preserve all field data
+        const results = await jiraService.searchIssuesRaw(
           jql,
           50,
-          0, // startAt
+          undefined, // nextPageToken (first page)
           undefined, // expand
           ['summary', 'status', 'issuetype', 'updated', 'assignee', 'priority'],
         );
@@ -97,7 +97,7 @@ export function registerDeploymentReportTool(
         const byStatus: Record<string, any[]> = {};
 
         results.issues.forEach((issue: any) => {
-          const status = issue.status || 'Unknown';
+          const status = issue.fields?.status?.name || 'Unknown';
           if (!byStatus[status]) {
             byStatus[status] = [];
           }
@@ -114,7 +114,7 @@ export function registerDeploymentReportTool(
           output += `### ${status}\n`;
           byStatus[status].forEach(issue => {
             const key = issue.key;
-            const summary = issue.title || 'No summary';
+            const summary = issue.fields?.summary || 'No summary';
             const assignee = issue.fields?.assignee?.displayName || 'Unassigned';
             output += `- **${key}** - ${summary} (Assigned: ${assignee})\n`;
           });

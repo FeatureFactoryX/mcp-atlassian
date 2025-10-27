@@ -29,7 +29,7 @@ export function registerSearchJiraIssuesTool(
         const results = await jiraService.searchIssues(
           cleanedJql,
           maxResults,
-          0, // startAt
+          undefined, // nextPageToken (first page)
           undefined, // expand
           ['key', 'summary', 'status', 'assignee', 'priority'], // fields
         );
