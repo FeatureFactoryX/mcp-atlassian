@@ -20,18 +20,27 @@ export function registerSearchJiraIssuesTool(
         .number()
         .optional()
         .describe('The maximum number of results to return (default: 50)'),
+      fields: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Fields to return (default: key, summary, status, assignee, priority). ' +
+            'Common fields: key, summary, status, assignee, priority, created, updated, ' +
+            'reporter, description, labels, components, fixVersions, issuetype, project, ' +
+            'customfield_10016 (story points)',
+        ),
     },
-    async ({ jql, maxResults }) => {
+    async ({ jql, maxResults, fields }) => {
       try {
         // remove any new lines in the query
         const cleanedJql = jql.replace(/\n/g, '');
-        // Use field filtering to reduce token consumption (only 5 fields)
+        const defaultFields = ['key', 'summary', 'status', 'assignee', 'priority'];
         const results = await jiraService.searchIssues(
           cleanedJql,
           maxResults,
           undefined, // nextPageToken (first page)
           undefined, // expand
-          ['key', 'summary', 'status', 'assignee', 'priority'], // fields
+          fields || defaultFields,
         );
         return formatResponse(results);
       } catch (err) {
